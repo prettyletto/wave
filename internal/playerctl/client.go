@@ -66,7 +66,6 @@ func (c *Client) Play(ctx context.Context) error {
 func (c *Client) Pause(ctx context.Context) error {
 	_, err := c.run(ctx, "pause")
 	return err
-
 }
 
 func (c *Client) Toggle(ctx context.Context) error {
@@ -101,7 +100,6 @@ func (c *Client) SetPosition(ctx context.Context, seconds int) error {
 }
 
 func (c *Client) Seek(ctx context.Context, seconds int) error {
-
 	sign := "+"
 
 	if seconds < 0 {
@@ -132,7 +130,49 @@ func (c *Client) MetaData(ctx context.Context, key string) error {
 	return err
 }
 
-func (c *Client) Status(ctx context.Context) error {
-	_, err := c.run(ctx, "status")
+func (c *Client) Status(ctx context.Context) (PlayStatus, error) {
+	out, err := c.run(ctx, "status")
+	if err != nil {
+		return "" , err
+	}
+
+	return ParsePlayStatus(out)
+}
+
+func (c *Client) Loop(ctx context.Context) (LoopStatus, error) {
+	out, err := c.run(ctx, "loop")
+	if err != nil {
+		return "" , err
+	}
+
+	return ParseLoopStatus(out)
+}
+
+
+func (c *Client) SetLoop(ctx context.Context, s string) error {
+	l, err := ParseLoopStatus(s)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.run(ctx, "loop", string(l))
+	return err
+}
+
+func (c *Client) Shuffle(ctx context.Context) (ShuffleStatus, error) {
+	out, err := c.run(ctx, "shuffle")
+	if err != nil {
+		return "", err
+	}
+	return ParseShuffleStatus(out)
+}
+
+func (c *Client) SetShuffle(ctx context.Context, s string) error {
+	sf, err := ParseShuffleStatus(s)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.run(ctx, "shuffle", string(sf))
 	return err
 }

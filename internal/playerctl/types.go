@@ -50,12 +50,12 @@ func ParseLoopStatus(s string) (LoopStatus, error) {
 type ShuffleStatus string
 
 const (
-	ShuffleOff    LoopStatus = "Off"
-	ShuffleOn     LoopStatus = "On"
-	ShuffleToggle LoopStatus = "Toggle"
+	ShuffleOff    ShuffleStatus = "Off"
+	ShuffleOn     ShuffleStatus = "On"
+	ShuffleToggle ShuffleStatus = "Toggle"
 )
 
-func ParseShuffleStatus(s string) (LoopStatus, error) {
+func ParseShuffleStatus(s string) (ShuffleStatus, error) {
 	switch strings.TrimSpace(s) {
 	case string(ShuffleOff):
 		return ShuffleOff, nil
