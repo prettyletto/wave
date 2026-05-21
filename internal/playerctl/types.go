@@ -22,7 +22,7 @@ func ParsePlayStatus(s string) (PlayStatus, error) {
 	case string(StatusStop):
 		return StatusStop, nil
 	default:
-		return "", fmt.Errorf("ivalid playback status: %q", s)
+		return "", fmt.Errorf("invalid playback status: %q", s)
 	}
 }
 

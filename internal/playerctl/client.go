@@ -58,6 +58,15 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func (c *Client) Players(ctx context.Context) ([]string, error) {
+	out, err := c.run(ctx, "-l")
+	if err != nil {
+		return []string{}, err
+	}
+
+	return strings.Split(out, "\n"), err
+}
+
 func (c *Client) Play(ctx context.Context) error {
 	_, err := c.run(ctx, "play")
 	return err
@@ -133,7 +142,7 @@ func (c *Client) MetaData(ctx context.Context, key string) error {
 func (c *Client) Status(ctx context.Context) (PlayStatus, error) {
 	out, err := c.run(ctx, "status")
 	if err != nil {
-		return "" , err
+		return "", err
 	}
 
 	return ParsePlayStatus(out)
@@ -142,12 +151,11 @@ func (c *Client) Status(ctx context.Context) (PlayStatus, error) {
 func (c *Client) Loop(ctx context.Context) (LoopStatus, error) {
 	out, err := c.run(ctx, "loop")
 	if err != nil {
-		return "" , err
+		return "", err
 	}
 
 	return ParseLoopStatus(out)
 }
-
 
 func (c *Client) SetLoop(ctx context.Context, s string) error {
 	l, err := ParseLoopStatus(s)
