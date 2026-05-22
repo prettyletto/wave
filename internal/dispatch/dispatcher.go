@@ -19,6 +19,8 @@ type Player interface {
 
 	Players(context.Context) ([]string, error)
 	Status(context.Context) (playerctl.PlayStatus, error)
+	MetaData(context.Context) (string, error)
+	Now(context.Context) (playerctl.TrackInfo, error)
 	Volume(context.Context) (float64, error)
 	SetVolume(context.Context, float64) error
 	Loop(context.Context) (playerctl.LoopStatus, error)
@@ -73,10 +75,34 @@ func (d *Dispatcher) Dispatch(ctx context.Context, args []string) error {
 	case "shuffle":
 		return d.shuffle(ctx, args[1:])
 	case "players":
-	return d.players(ctx)
+		return d.players(ctx)
+	case "metadata":
+		return d.metadata(ctx)
+	case "now":
+		return d.now(ctx)
 	default:
-		return fmt.Errorf("unkown command %q", args[0])
+		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func (d *Dispatcher) now(ctx context.Context) error {
+	ti, err := d.player.Now(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(d.out, ti)
+	return nil
+}
+
+func (d *Dispatcher) metadata(ctx context.Context) error {
+	pls, err := d.player.MetaData(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(d.out, pls)
+	return nil
 }
 
 func (d *Dispatcher) volume(ctx context.Context, args []string) error {
@@ -105,7 +131,6 @@ func (d *Dispatcher) players(ctx context.Context) error {
 	fmt.Fprintln(d.out, pls)
 	return nil
 }
-
 
 func (d *Dispatcher) loop(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -140,6 +165,8 @@ func (d *Dispatcher) help() error {
 	fmt.Fprintln(d.out)
 	fmt.Fprintln(d.out, "commands:")
 	fmt.Fprintln(d.out, "  status")
+	fmt.Fprintln(d.out, "  metadata <key>")
+	fmt.Fprintln(d.out, "  now")
 	fmt.Fprintln(d.out, "  players")
 	fmt.Fprintln(d.out, "  play")
 	fmt.Fprintln(d.out, "  pause")

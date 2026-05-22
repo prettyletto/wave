@@ -134,7 +134,45 @@ func (c *Client) Volume(ctx context.Context) (float64, error) {
 	return strconv.ParseFloat(out, 64)
 }
 
-func (c *Client) MetaData(ctx context.Context, key string) error {
+func (c *Client) MetaData(ctx context.Context) (string, error) {
+	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:length}}"
+
+	out, err := c.run(ctx, "metadata", "--format", format)
+	if err != nil {
+		return "", err
+	}
+
+	ti, err := ParseTrackInfo(out)
+
+	out = ti.String()
+
+	return out, err
+}
+
+func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
+	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:length}}"
+
+	out, err := c.run(ctx, "metadata", "--format", format)
+	if err != nil {
+		return TrackInfo{}, err
+	}
+
+	info, err := ParseTrackInfo(out)
+	if err != nil {
+		return TrackInfo{}, err
+	}
+
+	posOut, err := c.run(ctx, "position")
+	if err == nil {
+		if sec, convErr := strconv.ParseFloat(strings.TrimSpace(posOut), 64); convErr == nil {
+			info.Position = int64(sec * 1_000_000)
+		}
+	}
+
+	return info, nil
+}
+
+func (c *Client) MetaDataKey(ctx context.Context, key string) error {
 	_, err := c.run(ctx, "metadata", key)
 	return err
 }
