@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/prettyletto/wave/internal/playerctl"
+	"github.com/prettyletto/wave/internal/tui"
 )
 
 type Player interface {
@@ -19,7 +20,7 @@ type Player interface {
 
 	Players(context.Context) ([]string, error)
 	Status(context.Context) (playerctl.PlayStatus, error)
-	MetaData(context.Context) (string, error)
+	MetaDataKey(context.Context, string) (string, error)
 	Now(context.Context) (playerctl.TrackInfo, error)
 	Volume(context.Context) (float64, error)
 	SetVolume(context.Context, float64) error
@@ -43,7 +44,7 @@ func New(player Player, out io.Writer) *Dispatcher {
 
 func (d *Dispatcher) Dispatch(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return d.help()
+		return d.tui()
 	}
 
 	switch args[0] {
@@ -77,7 +78,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, args []string) error {
 	case "players":
 		return d.players(ctx)
 	case "metadata":
-		return d.metadata(ctx)
+		return d.metadata(ctx, args[1])
 	case "now":
 		return d.now(ctx)
 	default:
@@ -95,8 +96,8 @@ func (d *Dispatcher) now(ctx context.Context) error {
 	return nil
 }
 
-func (d *Dispatcher) metadata(ctx context.Context) error {
-	pls, err := d.player.MetaData(ctx)
+func (d *Dispatcher) metadata(ctx context.Context, key string) error {
+	pls, err := d.player.MetaDataKey(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -178,4 +179,8 @@ func (d *Dispatcher) help() error {
 	fmt.Fprintln(d.out, "  loop [None|Track|Playlist]")
 	fmt.Fprintln(d.out, "  shuffle [On|Off|Toggle]")
 	return nil
+}
+
+func (d *Dispatcher) tui() error {
+	return tui.Run(d.player)
 }

@@ -134,21 +134,6 @@ func (c *Client) Volume(ctx context.Context) (float64, error) {
 	return strconv.ParseFloat(out, 64)
 }
 
-func (c *Client) MetaData(ctx context.Context) (string, error) {
-	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:length}}"
-
-	out, err := c.run(ctx, "metadata", "--format", format)
-	if err != nil {
-		return "", err
-	}
-
-	ti, err := ParseTrackInfo(out)
-
-	out = ti.String()
-
-	return out, err
-}
-
 func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
 	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:length}}"
 
@@ -172,9 +157,9 @@ func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
 	return info, nil
 }
 
-func (c *Client) MetaDataKey(ctx context.Context, key string) error {
-	_, err := c.run(ctx, "metadata", key)
-	return err
+func (c *Client) MetaDataKey(ctx context.Context, key string) (string, error) {
+	out, err := c.run(ctx, "metadata", key)
+	return out, err
 }
 
 func (c *Client) Status(ctx context.Context) (PlayStatus, error) {
