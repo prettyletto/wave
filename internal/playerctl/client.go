@@ -58,6 +58,22 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func (c *Client) runForPlayer(ctx context.Context, player string, args ...string) (string, error) {
+	player = strings.TrimSpace(player)
+	if player == "" {
+		return c.run(ctx, args...)
+	}
+
+	fullArgs := append([]string{"--player", player}, args...)
+
+	out, err := c.runner.Run(ctx, "playerctl", fullArgs...)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(out)), nil
+}
+
 func (c *Client) Players(ctx context.Context) ([]string, error) {
 	out, err := c.run(ctx, "-l")
 	if err != nil {
@@ -147,7 +163,7 @@ func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
 		return TrackInfo{}, err
 	}
 
-	posOut, err := c.run(ctx, "position")
+	posOut, err := c.runForPlayer(ctx, info.Player, "position")
 	if err == nil {
 		if sec, convErr := strconv.ParseFloat(strings.TrimSpace(posOut), 64); convErr == nil {
 			info.Position = int64(sec * 1_000_000)
