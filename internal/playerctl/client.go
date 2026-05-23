@@ -74,13 +74,43 @@ func (c *Client) runForPlayer(ctx context.Context, player string, args ...string
 	return strings.TrimSpace(string(out)), nil
 }
 
+func (c *Client) ToggleForPlayer(ctx context.Context, player string) error {
+	_, err := c.runForPlayer(ctx, player, "play-pause")
+	return err
+}
+
+func (c *Client) SeekForPlayer(ctx context.Context, player string, seconds int) error {
+	sign := "+"
+
+	if seconds < 0 {
+		sign = "-"
+		seconds = -seconds
+	}
+
+	_, err := c.runForPlayer(ctx, player, "position", fmt.Sprintf("%d%s", seconds, sign))
+	return err
+}
+
 func (c *Client) Players(ctx context.Context) ([]string, error) {
 	out, err := c.run(ctx, "-l")
 	if err != nil {
 		return []string{}, err
 	}
 
-	return strings.Split(out, "\n"), err
+	if out == "" {
+		return []string{}, nil
+	}
+
+	players := strings.Split(out, "\n")
+	filtered := players[:0]
+	for _, player := range players {
+		player = strings.TrimSpace(player)
+		if player != "" {
+			filtered = append(filtered, player)
+		}
+	}
+
+	return filtered, nil
 }
 
 func (c *Client) Play(ctx context.Context) error {
@@ -150,10 +180,10 @@ func (c *Client) Volume(ctx context.Context) (float64, error) {
 	return strconv.ParseFloat(out, 64)
 }
 
-func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
+func (c *Client) NowForPlayer(ctx context.Context, player string) (TrackInfo, error) {
 	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:length}}"
 
-	out, err := c.run(ctx, "metadata", "--format", format)
+	out, err := c.runForPlayer(ctx, player, "metadata", "--format", format)
 	if err != nil {
 		return TrackInfo{}, err
 	}
@@ -171,6 +201,10 @@ func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
 	}
 
 	return info, nil
+}
+
+func (c *Client) Now(ctx context.Context) (TrackInfo, error) {
+	return c.NowForPlayer(ctx, "")
 }
 
 func (c *Client) MetaDataKey(ctx context.Context, key string) (string, error) {

@@ -14,14 +14,18 @@ type Player interface {
 	Play(context.Context) error
 	Pause(context.Context) error
 	Toggle(context.Context) error
+	ToggleForPlayer(context.Context, string) error
 	Stop(context.Context) error
 	Next(context.Context) error
+	Seek(context.Context, int) error
+	SeekForPlayer(context.Context, string, int) error
 	Previous(context.Context) error
 
 	Players(context.Context) ([]string, error)
 	Status(context.Context) (playerctl.PlayStatus, error)
 	MetaDataKey(context.Context, string) (string, error)
 	Now(context.Context) (playerctl.TrackInfo, error)
+	NowForPlayer(context.Context, string) (playerctl.TrackInfo, error)
 	Volume(context.Context) (float64, error)
 	SetVolume(context.Context, float64) error
 	Loop(context.Context) (playerctl.LoopStatus, error)
