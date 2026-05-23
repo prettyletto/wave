@@ -20,6 +20,8 @@ type Player interface {
 
 	ToggleForPlayer(context.Context, string) error
 	SeekForPlayer(context.Context, string, int) error
+	PreviousForPlayer(context.Context, string) error
+	NextForPlayer(context.Context, string) error
 }
 
 type playersMsg struct {
@@ -33,6 +35,14 @@ type nowMsg struct {
 }
 
 type toggleMsg struct {
+	err error
+}
+
+type previousMsg struct {
+	err error
+}
+
+type nextMsg struct {
 	err error
 }
 
@@ -89,6 +99,20 @@ func seekCmd(p Player, selectedPlayer string, seconds int) tea.Cmd {
 	}
 }
 
+func prevCmd(p Player, selectedPlayer string) tea.Cmd {
+	return func() tea.Msg {
+		err := p.PreviousForPlayer(context.Background(), selectedPlayer)
+		return previousMsg{err: err}
+	}
+}
+
+func nextCmd(p Player, selectedPlayer string) tea.Cmd {
+	return func() tea.Msg {
+		err := p.NextForPlayer(context.Background(), selectedPlayer)
+		return nextMsg{err: err}
+	}
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second/2, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -112,7 +136,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.selectedPlayer != "" && containsPlayer(m.players, m.selectedPlayer) {
-			return m, fetchNowCmd(m.player, m.selectedPlayer)
+			return m, nil
 		}
 
 		if m.now.Player != "" && containsPlayer(m.players, m.now.Player) {
@@ -132,9 +156,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedPlayer = msg.info.Player
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
 		}
-		if m.selectedPlayer == "" {
-			m.selectedPlayer = msg.info.Player
-		}
 		m.now = msg.info
 		m.err = msg.err
 		return m, nil
@@ -151,7 +172,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, fetchNowCmd(m.player, m.selectedPlayer)
 	case tickMsg:
-		return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), tickCmd())
+		return m, tea.Batch(
+			fetchPlayersCmd(m.player),
+			fetchNowCmd(m.player, m.selectedPlayer),
+			tickCmd())
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
@@ -164,6 +188,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, fetchNowCmd(m.player, m.selectedPlayer)
 		case " ":
 			return m, toggleCmd(m.player, m.selectedPlayer)
+		case "ctrl+left":
+			return m, prevCmd(m.player, m.selectedPlayer)
+		case "ctrl+right":
+			return m, nextCmd(m.player, m.selectedPlayer)
 		case "left":
 			return m, seekCmd(m.player, m.selectedPlayer, -5)
 		case "right":

@@ -16,10 +16,12 @@ type Player interface {
 	Toggle(context.Context) error
 	ToggleForPlayer(context.Context, string) error
 	Stop(context.Context) error
-	Next(context.Context) error
 	Seek(context.Context, int) error
 	SeekForPlayer(context.Context, string, int) error
+	Next(context.Context) error
 	Previous(context.Context) error
+	NextForPlayer(context.Context, string) error
+	PreviousForPlayer(context.Context, string) error
 
 	Players(context.Context) ([]string, error)
 	Status(context.Context) (playerctl.PlayStatus, error)

@@ -143,8 +143,18 @@ func (c *Client) Next(ctx context.Context) error {
 	return err
 }
 
+func (c *Client) NextForPlayer(ctx context.Context, player string) error {
+	_, err := c.runForPlayer(ctx, player, "next")
+	return err
+}
+
 func (c *Client) Previous(ctx context.Context) error {
 	_, err := c.run(ctx, "previous")
+	return err
+}
+
+func (c *Client) PreviousForPlayer(ctx context.Context, player string) error {
+	_, err := c.runForPlayer(ctx, player, "previous")
 	return err
 }
 
