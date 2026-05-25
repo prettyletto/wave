@@ -179,23 +179,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
-			m.selectedPlayer = nextPlayer(m.players, m.selectedPlayer, 1)
+			next := nextPlayer(m.players, m.selectedPlayer, 1)
+			if next == "" {
+				return m, nil
+			}
+			m.selectedPlayer = next
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
 			return m, fetchNowCmd(m.player, m.selectedPlayer)
 		case "shift+tab":
-			m.selectedPlayer = nextPlayer(m.players, m.selectedPlayer, -1)
+			next := nextPlayer(m.players, m.selectedPlayer, -1)
+			if next == "" {
+				return m, nil
+			}
+			m.selectedPlayer = next
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
 			return m, fetchNowCmd(m.player, m.selectedPlayer)
 		case " ":
-			return m, toggleCmd(m.player, m.selectedPlayer)
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return toggleCmd(m.player, player)
+			})
 		case "ctrl+left":
-			return m, prevCmd(m.player, m.selectedPlayer)
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return prevCmd(m.player, player)
+			})
 		case "ctrl+right":
-			return m, nextCmd(m.player, m.selectedPlayer)
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return nextCmd(m.player, player)
+			})
 		case "left":
-			return m, seekCmd(m.player, m.selectedPlayer, -5)
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return seekCmd(m.player, player, -5)
+			})
 		case "right":
-			return m, seekCmd(m.player, m.selectedPlayer, 5)
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return seekCmd(m.player, player, 5)
+			})
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
@@ -233,4 +251,12 @@ func nextPlayer(players []string, selected string, delta int) string {
 	}
 	i = ((i + delta + len(players)) % len(players))
 	return players[i]
+}
+
+func (m model) withSelectedPlayer(cmd func(string) tea.Cmd) (tea.Model, tea.Cmd) {
+	if m.selectedPlayer == "" {
+		return m, nil
+	}
+
+	return m, cmd(m.selectedPlayer)
 }
