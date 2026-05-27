@@ -8,6 +8,7 @@ import (
 
 	"github.com/prettyletto/wave/internal/playerctl"
 	"github.com/prettyletto/wave/internal/tui"
+	"github.com/prettyletto/wave/internal/wpctl"
 )
 
 type Player interface {
@@ -36,14 +37,20 @@ type Player interface {
 	SetShuffle(context.Context, string) error
 }
 
+type Audio interface {
+	Streams(context.Context) ([]wpctl.Stream, error)
+}
+
 type Dispatcher struct {
 	player Player
+	audio  Audio
 	out    io.Writer
 }
 
-func New(player Player, out io.Writer) *Dispatcher {
+func New(player Player, audio Audio, out io.Writer) *Dispatcher {
 	return &Dispatcher{
 		player: player,
+		audio:  audio,
 		out:    out,
 	}
 }
@@ -54,6 +61,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, args []string) error {
 	}
 
 	switch args[0] {
+	case "streams":
+		return d.streams(ctx)
 	case "help", "-h", "--help":
 		return d.help()
 	case "play":
@@ -127,6 +136,16 @@ func (d *Dispatcher) volume(ctx context.Context, args []string) error {
 	}
 
 	return d.player.SetVolume(ctx, volume)
+}
+
+func (d *Dispatcher) streams(ctx context.Context) error {
+	pls, err := d.audio.Streams(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(d.out, pls)
+	return nil
 }
 
 func (d *Dispatcher) players(ctx context.Context) error {
