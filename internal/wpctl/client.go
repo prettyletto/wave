@@ -2,9 +2,9 @@ package wpctl
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -40,8 +40,8 @@ func New(r Runner) *Client {
 	return &Client{runner: r}
 }
 
-func (c *Client) run(ctx context.Context, args ...string) (string, error) {
-	out, err := c.runner.Run(ctx, "wpctl", args...)
+func (c *Client) run(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := c.runner.Run(ctx, name, args...)
 	if err != nil {
 		return "", err
 	}
@@ -50,188 +50,179 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 }
 
 func (c *Client) Streams(ctx context.Context) ([]Stream, error) {
-	out, err := c.run(ctx, "status")
+	streams, err := c.streamsFromDump(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	ids := parseStatusStreamIDs(out)
-	streams := make([]Stream, 0, len(ids))
-
-	for _, id := range ids {
-		stream, err := c.streamByID(ctx, id)
+	for i := range streams {
+		volume, muted, err := c.streamVolume(ctx, streams[i].ID)
 		if err != nil {
 			continue
 		}
+		streams[i].Volume = volume
+		streams[i].Muted = muted
+	}
+
+	return streams, nil
+}
+
+func (c *Client) StreamByID(ctx context.Context, id string) (Stream, error) {
+	streams, err := c.streamsFromDump(ctx)
+	if err != nil {
+		return Stream{}, err
+	}
+
+	for _, stream := range streams {
+		if stream.ID != id {
+			continue
+		}
+
+		volume, muted, err := c.streamVolume(ctx, id)
+		if err != nil {
+			return Stream{}, err
+		}
+
+		stream.Volume = volume
+		stream.Muted = muted
+		return stream, nil
+	}
+
+	return Stream{}, fmt.Errorf("stream %s not found", id)
+}
+
+func (c *Client) SetVolume(ctx context.Context, streamID string, volume float64) error {
+	_, err := c.run(ctx, "wpctl", "set-volume", streamID, fmt.Sprintf("%.2f", volume))
+	return err
+}
+
+func (c *Client) ChangeVolume(ctx context.Context, streamID string, deltaPercent int) error {
+	sign := "+"
+	if deltaPercent < 0 {
+		sign = "-"
+		deltaPercent = -deltaPercent
+	}
+
+	_, err := c.run(ctx, "wpctl", "set-volume", streamID, fmt.Sprintf("%d%%%s", deltaPercent, sign))
+	return err
+}
+
+func (c *Client) ToggleMute(ctx context.Context, streamID string) error {
+	_, err := c.run(ctx, "wpctl", "set-mute", streamID, "toggle")
+	return err
+}
+
+func (c *Client) streamVolume(ctx context.Context, id string) (float64, bool, error) {
+	out, err := c.run(ctx, "wpctl", "get-volume", id)
+	if err != nil {
+		return 0, false, fmt.Errorf("get stream volume %s: %w", id, err)
+	}
+
+	return parseVolume(out)
+}
+
+func (c *Client) streamsFromDump(ctx context.Context) ([]Stream, error) {
+	out, err := c.run(ctx, "pw-dump")
+	if err != nil {
+		return nil, err
+	}
+
+	var objects []pwObject
+	if err := json.Unmarshal([]byte(out), &objects); err != nil {
+		return nil, fmt.Errorf("parse pw-dump: %w", err)
+	}
+
+	clients := make(map[int]pwProps)
+	for _, obj := range objects {
+		if obj.Type != "PipeWire:Interface:Client" || obj.Info == nil {
+			continue
+		}
+		clients[obj.ID] = obj.Info.Props
+	}
+
+	streams := make([]Stream, 0)
+	for _, obj := range objects {
+		if obj.Type != "PipeWire:Interface:Node" || obj.Info == nil {
+			continue
+		}
+
+		props := obj.Info.Props
+		if props.String("media.class") != "Stream/Output/Audio" {
+			continue
+		}
+
+		clientProps := clients[props.Int("client.id")]
+		stream := Stream{
+			ID:      strconv.Itoa(obj.ID),
+			Name:    preferredName(props, clientProps),
+			AppName: preferredAppName(props, clientProps),
+			Binary:  preferredBinary(props, clientProps),
+		}
+
+		if stream.Name == "" && stream.AppName == "" && stream.Binary == "" {
+			continue
+		}
+
 		streams = append(streams, stream)
 	}
 
 	return streams, nil
 }
 
-func (c *Client) streamByID(ctx context.Context, id string) (Stream, error) {
-	inspectOut, err := c.run(ctx, "inspect", id)
-	if err != nil {
-		return Stream{}, fmt.Errorf("inspect stream %s: %w", id, err)
+func preferredName(nodeProps, clientProps pwProps) string {
+	for _, candidate := range []string{
+		nodeProps.String("application.name"),
+		clientProps.String("application.name"),
+		nodeProps.String("node.name"),
+		nodeProps.String("node.description"),
+		nodeProps.String("media.name"),
+		clientProps.String("media.name"),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || isGenericName(candidate) {
+			continue
+		}
+		return candidate
 	}
 
-	volumeOut, err := c.run(ctx, "get-volume", id)
-	if err != nil {
-		return Stream{}, fmt.Errorf("get stream volume %s: %w", id, err)
-	}
-
-	stream := parseInspect(id, inspectOut)
-
-	volume, muted, err := parseVolume(volumeOut)
-	if err != nil {
-		return Stream{}, fmt.Errorf("parse stream volume %s: %w", id, err)
-	}
-
-	stream.Volume = volume
-	stream.Muted = muted
-
-	return stream, nil
+	return ""
 }
 
-func (c *Client) SetVolume(ctx context.Context, streamID string, volume float64) error {
-	_, err := c.run(ctx, "set-volume", streamID, fmt.Sprintf("%.2f", volume))
-	return err
+func preferredAppName(nodeProps, clientProps pwProps) string {
+	for _, candidate := range []string{
+		nodeProps.String("application.name"),
+		clientProps.String("application.name"),
+		nodeProps.String("node.name"),
+		nodeProps.String("media.name"),
+		clientProps.String("media.name"),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || isGenericName(candidate) {
+			continue
+		}
+		return candidate
+	}
+
+	return ""
 }
 
-func (c *Client) ChangeVolume(ctx context.Context, streamID string, deltaPercent int) error {
-	sign := "+"
-
-	if deltaPercent < 0 {
-		sign = "-"
-		deltaPercent = -deltaPercent
+func preferredBinary(nodeProps, clientProps pwProps) string {
+	for _, candidate := range []string{
+		nodeProps.String("application.process.binary"),
+		clientProps.String("application.process.binary"),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			return candidate
+		}
 	}
 
-	_, err := c.run(ctx, "set-volume", streamID, fmt.Sprintf("%d%%%s", deltaPercent, sign))
-	return err
+	return ""
 }
 
-func (c *Client) ToggleMute(ctx context.Context, streamID string) error {
-	_, err := c.run(ctx, "set-mute", streamID, "toggle")
-	return err
-}
-
-func parseStatusStreamIDs(out string) []string {
-	lines := strings.Split(out, "\n")
-	ids := make([]string, 0)
-
-	inAudio := false
-	inStreams := false
-	streamIndent := -1
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		if trimmed == "Audio" {
-			inAudio = true
-			inStreams = false
-			streamIndent = -1
-			continue
-		}
-
-		if trimmed == "Video" {
-			break
-		}
-
-		if !inAudio {
-			continue
-		}
-
-		if strings.Contains(trimmed, "Streams:") {
-			inStreams = true
-			streamIndent = -1
-			continue
-		}
-
-		if !inStreams {
-			continue
-		}
-
-		if isAudioSubsectionHeader(trimmed) {
-			break
-		}
-
-		id, ok := parseLeadingID(trimmed)
-		if !ok {
-			continue
-		}
-
-		indent := leadingWhitespaceWidth(line)
-
-		if streamIndent == -1 {
-			streamIndent = indent
-			ids = append(ids, id)
-			continue
-		}
-
-		if indent == streamIndent {
-			ids = append(ids, id)
-		}
-	}
-
-	return ids
-}
-
-func parseInspect(id, out string) Stream {
-	stream := Stream{
-		ID: id,
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-
-		switch {
-		case strings.HasPrefix(line, "node.description = "):
-			stream.Name = unquoteValue(line)
-		case strings.HasPrefix(line, "node.nick = "):
-			if stream.Name == "" {
-				stream.Name = unquoteValue(line)
-			}
-		case strings.HasPrefix(line, "media.name = "):
-			if stream.Name == "" {
-				stream.Name = unquoteValue(line)
-			}
-		case strings.HasPrefix(line, "application.name = "):
-			stream.AppName = unquoteValue(line)
-		case strings.HasPrefix(line, "application.process.binary = "):
-			stream.Binary = unquoteValue(line)
-		}
-	}
-
-	if stream.Name == "" {
-		stream.Name = stream.AppName
-	}
-	if stream.Name == "" {
-		stream.Name = stream.Binary
-	}
-
-	return stream
-}
-
-func isAudioSubsectionHeader(trimmed string) bool {
-	return strings.Contains(trimmed, "Devices:") ||
-		strings.Contains(trimmed, "Sinks:") ||
-		strings.Contains(trimmed, "Sources:") ||
-		strings.Contains(trimmed, "Filters:")
-}
-
-func leadingWhitespaceWidth(s string) int {
-	count := 0
-	for _, r := range s {
-		if r == ' ' || r == '\t' {
-			count++
-			continue
-		}
-		break
-	}
-	return count
+func isGenericName(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return value == "" || value == "playback" || strings.HasPrefix(value, "output_")
 }
 
 func parseVolume(out string) (float64, bool, error) {
@@ -245,29 +236,51 @@ func parseVolume(out string) (float64, bool, error) {
 		return 0, false, fmt.Errorf("invalid volume value %q: %w", fields[1], err)
 	}
 
-	muted := strings.Contains(out, "[MUTED]")
-
-	return volume, muted, nil
+	return volume, strings.Contains(out, "[MUTED]"), nil
 }
 
-var leadingIDPattern = regexp.MustCompile(`(?:^|[^\d])(\d+)\.`)
-
-func parseLeadingID(line string) (string, bool) {
-	matches := leadingIDPattern.FindStringSubmatch(line)
-	if len(matches) != 2 {
-		return "", false
-	}
-
-	return matches[1], true
+type pwObject struct {
+	ID   int           `json:"id"`
+	Type string        `json:"type"`
+	Info *pwObjectInfo `json:"info"`
 }
 
-func unquoteValue(line string) string {
-	idx := strings.Index(line, "=")
-	if idx == -1 {
+type pwObjectInfo struct {
+	Props pwProps `json:"props"`
+}
+
+type pwProps map[string]any
+
+func (p pwProps) String(key string) string {
+	if p == nil {
 		return ""
 	}
 
-	value := strings.TrimSpace(line[idx+1:])
-	value = strings.Trim(value, "\"")
-	return value
+	value, ok := p[key]
+	if !ok {
+		return ""
+	}
+
+	s, _ := value.(string)
+	return s
+}
+
+func (p pwProps) Int(key string) int {
+	if p == nil {
+		return 0
+	}
+
+	value, ok := p[key]
+	if !ok {
+		return 0
+	}
+
+	switch v := value.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
 }

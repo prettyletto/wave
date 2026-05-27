@@ -39,6 +39,9 @@ type Player interface {
 
 type Audio interface {
 	Streams(context.Context) ([]wpctl.Stream, error)
+	StreamByID(context.Context, string) (wpctl.Stream, error)
+	ChangeVolume(context.Context, string, int) error
+	ToggleMute(context.Context, string) error
 }
 
 type Dispatcher struct {
@@ -207,5 +210,5 @@ func (d *Dispatcher) help() error {
 }
 
 func (d *Dispatcher) tui() error {
-	return tui.Run(d.player)
+	return tui.Run(d.player, d.audio)
 }
