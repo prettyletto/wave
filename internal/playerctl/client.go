@@ -51,11 +51,7 @@ func (c *Client) args(base ...string) []string {
 
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 	out, err := c.runner.Run(ctx, "playerctl", c.args(args...)...)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(out)), err
 }
 
 func (c *Client) runForPlayer(ctx context.Context, player string, args ...string) (string, error) {
@@ -67,11 +63,36 @@ func (c *Client) runForPlayer(ctx context.Context, player string, args ...string
 	fullArgs := append([]string{"--player", player}, args...)
 
 	out, err := c.runner.Run(ctx, "playerctl", fullArgs...)
-	if err != nil {
-		return "", err
+	return strings.TrimSpace(string(out)), err
+}
+
+func normalizeUnsupported(out string, err error) error {
+	if err == nil {
+		return nil
 	}
 
-	return strings.TrimSpace(string(out)), nil
+	msg := strings.TrimSpace(out)
+	if strings.Contains(msg, "No player could handle this command") {
+		return fmt.Errorf("%w: %s", ErrUnsupported, msg)
+	}
+
+	return err
+}
+
+func normalizeNoActivePlayer(out string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	msg := strings.TrimSpace(out)
+	switch {
+	case strings.Contains(msg, "No players found"):
+		return fmt.Errorf("%w: %s", ErrNoPlayersFound, msg)
+	case strings.Contains(msg, "No player could handle this command"):
+		return fmt.Errorf("%w: %s", ErrNoActivePlayer, msg)
+	default:
+		return err
+	}
 }
 
 func (c *Client) ToggleForPlayer(ctx context.Context, player string) error {
@@ -195,7 +216,7 @@ func (c *Client) NowForPlayer(ctx context.Context, player string) (TrackInfo, er
 
 	out, err := c.runForPlayer(ctx, player, "metadata", "--format", format)
 	if err != nil {
-		return TrackInfo{}, err
+		return TrackInfo{}, normalizeNoActivePlayer(out, err)
 	}
 
 	info, err := ParseTrackInfo(out)
@@ -234,7 +255,16 @@ func (c *Client) Status(ctx context.Context) (PlayStatus, error) {
 func (c *Client) Loop(ctx context.Context) (LoopStatus, error) {
 	out, err := c.run(ctx, "loop")
 	if err != nil {
-		return "", err
+		return "", normalizeUnsupported(out, err)
+	}
+
+	return ParseLoopStatus(out)
+}
+
+func (c *Client) LoopForPlayer(ctx context.Context, player string) (LoopStatus, error) {
+	out, err := c.runForPlayer(ctx, player, "loop")
+	if err != nil {
+		return "", normalizeUnsupported(out, err)
 	}
 
 	return ParseLoopStatus(out)
@@ -250,12 +280,35 @@ func (c *Client) SetLoop(ctx context.Context, s string) error {
 	return err
 }
 
+func (c *Client) SetLoopForPlayer(ctx context.Context, player string, s string) error {
+	l, err := ParseLoopStatus(s)
+	if err != nil {
+		return err
+	}
+
+	out, err := c.runForPlayer(ctx, player, "loop", string(l))
+	return normalizeUnsupported(out, err)
+}
+
 func (c *Client) Shuffle(ctx context.Context) (ShuffleStatus, error) {
 	out, err := c.run(ctx, "shuffle")
 	if err != nil {
-		return "", err
+		return "", normalizeUnsupported(out, err)
 	}
 	return ParseShuffleStatus(out)
+}
+
+func (c *Client) ShuffleForPlayer(ctx context.Context, player string) (ShuffleStatus, error) {
+	out, err := c.runForPlayer(ctx, player, "shuffle")
+	if err != nil {
+		return "", normalizeUnsupported(out, err)
+	}
+	return ParseShuffleStatus(out)
+}
+
+func (c *Client) ToggleShuffleForPlayer(ctx context.Context, player string) error {
+	out, err := c.runForPlayer(ctx, player, "shuffle", "toggle")
+	return normalizeUnsupported(out, err)
 }
 
 func (c *Client) SetShuffle(ctx context.Context, s string) error {

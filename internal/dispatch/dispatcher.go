@@ -33,8 +33,12 @@ type Player interface {
 	SetVolume(context.Context, float64) error
 	Loop(context.Context) (playerctl.LoopStatus, error)
 	SetLoop(context.Context, string) error
+	LoopForPlayer(context.Context, string) (playerctl.LoopStatus, error)
+	SetLoopForPlayer(context.Context, string, string) error
 	Shuffle(context.Context) (playerctl.ShuffleStatus, error)
 	SetShuffle(context.Context, string) error
+	ShuffleForPlayer(context.Context, string) (playerctl.ShuffleStatus, error)
+	ToggleShuffleForPlayer(context.Context, string) error
 }
 
 type Audio interface {

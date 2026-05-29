@@ -65,7 +65,7 @@ func ParseShuffleStatus(s string) (ShuffleStatus, error) {
 	case string(ShuffleToggle):
 		return ShuffleToggle, nil
 	default:
-		return "", fmt.Errorf("invalid loop status: %q", s)
+		return "", fmt.Errorf("invalid shuffle status: %q", s)
 	}
 }
 

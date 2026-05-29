@@ -7,4 +7,5 @@ var (
 	ErrNoPlayersFound    = errors.New("no players found")
 	ErrNoActivePlayer    = errors.New("no active player")
 	ErrInvalidResponse   = errors.New("invalid playerctl response")
+	ErrUnsupported       = errors.New("playerctl command unsupported")
 )

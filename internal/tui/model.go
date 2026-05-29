@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -22,6 +23,10 @@ type Player interface {
 	NowForPlayer(context.Context, string) (playerctl.TrackInfo, error)
 
 	ToggleForPlayer(context.Context, string) error
+	LoopForPlayer(context.Context, string) (playerctl.LoopStatus, error)
+	SetLoopForPlayer(context.Context, string, string) error
+	ShuffleForPlayer(context.Context, string) (playerctl.ShuffleStatus, error)
+	ToggleShuffleForPlayer(context.Context, string) error
 	SeekForPlayer(context.Context, string, int) error
 	PreviousForPlayer(context.Context, string) error
 	NextForPlayer(context.Context, string) error
@@ -69,8 +74,24 @@ type nextMsg struct {
 type seekMsg struct {
 	err error
 }
-type volumeMsg struct{ err error }
-type muteMsg struct{ err error }
+
+type shuffleMsg struct {
+	shuffle playerctl.ShuffleStatus
+	err     error
+}
+
+type loopMsg struct {
+	loop playerctl.LoopStatus
+	err  error
+}
+
+type shuffleToggleMsg struct{ err error }
+type loopSetMsg struct{ err error }
+
+type (
+	volumeMsg struct{ err error }
+	muteMsg   struct{ err error }
+)
 
 type tickMsg time.Time
 
@@ -78,8 +99,12 @@ type model struct {
 	player Player
 	audio  Audio
 
-	now playerctl.TrackInfo
-	err error
+	now     playerctl.TrackInfo
+	loop    playerctl.LoopStatus
+	shuffle playerctl.ShuffleStatus
+	loopUnsupported bool
+	shuffleUnsupported bool
+	err     error
 
 	players        []string
 	selectedPlayer string
@@ -102,7 +127,18 @@ func NewModel(p Player, a Audio) model {
 func fetchPlayersCmd(p Player) tea.Cmd {
 	return func() tea.Msg {
 		players, err := p.Players(context.Background())
-		return playersMsg{players: players, err: err}
+		if err != nil {
+			return playersMsg{players: nil, err: err}
+		}
+
+		active := make([]string, 0, len(players))
+		for _, player := range players {
+			if _, err := p.NowForPlayer(context.Background(), player); err == nil {
+				active = append(active, player)
+			}
+		}
+
+		return playersMsg{players: active, err: nil}
 	}
 }
 
@@ -132,13 +168,40 @@ func fetchStreamCmd(a Audio, selectedStream string) tea.Cmd {
 		stream, err := a.StreamByID(context.Background(), selectedStream)
 		return streamMsg{stream: stream, err: err}
 	}
-
 }
 
 func toggleCmd(p Player, selectedPlayer string) tea.Cmd {
 	return func() tea.Msg {
 		err := p.ToggleForPlayer(context.Background(), selectedPlayer)
 		return toggleMsg{err: err}
+	}
+}
+
+func getShuffleCmd(p Player, selectedPlayer string) tea.Cmd {
+	return func() tea.Msg {
+		sf, err := p.ShuffleForPlayer(context.Background(), selectedPlayer)
+		return shuffleMsg{shuffle: sf, err: err}
+	}
+}
+
+func getLoopCmd(p Player, selectedPlayer string) tea.Cmd {
+	return func() tea.Msg {
+		loop, err := p.LoopForPlayer(context.Background(), selectedPlayer)
+		return loopMsg{loop: loop, err: err}
+	}
+}
+
+func toggleShuffleCmd(p Player, selectedPlayer string) tea.Cmd {
+	return func() tea.Msg {
+		err := p.ToggleShuffleForPlayer(context.Background(), selectedPlayer)
+		return shuffleToggleMsg{err: err}
+	}
+}
+
+func setLoopCmd(p Player, selectedPlayer string, loop playerctl.LoopStatus) tea.Cmd {
+	return func() tea.Msg {
+		err := p.SetLoopForPlayer(context.Background(), selectedPlayer, string(loop))
+		return loopSetMsg{err: err}
 	}
 }
 
@@ -187,6 +250,8 @@ func (m model) Init() tea.Cmd {
 		fetchNowCmd(m.player, m.selectedPlayer),
 		fetchStreamsCmd(m.audio),
 		fetchStreamCmd(m.audio, m.selectedStream),
+		getLoopCmd(m.player, m.selectedPlayer),
+		getShuffleCmd(m.player, m.selectedPlayer),
 		tickCmd())
 }
 
@@ -196,6 +261,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.players = msg.players
 		m.err = msg.err
 		if msg.err != nil {
+			return m, nil
+		}
+
+		if len(m.players) == 0 {
+			m.selectedPlayer = ""
+			m.now = playerctl.TrackInfo{}
+			m.loop = ""
+			m.shuffle = ""
+			m.loopUnsupported = false
+			m.shuffleUnsupported = false
+			m.currentStream = wpctl.Stream{}
+			m.selectedStream = ""
+			m.err = nil
 			return m, nil
 		}
 
@@ -216,14 +294,73 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case nowMsg:
+		if errors.Is(msg.err, playerctl.ErrNoActivePlayer) || errors.Is(msg.err, playerctl.ErrNoPlayersFound) {
+			m.now = playerctl.TrackInfo{}
+			m.err = nil
+			return m, nil
+		}
 		if msg.err == nil && m.selectedPlayer == "" && msg.info.Player != "" {
 			m.selectedPlayer = msg.info.Player
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
-			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
+			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), getLoopCmd(m.player, m.selectedPlayer), getShuffleCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
 		}
 		m.now = msg.info
 		m.err = msg.err
 		return m, nil
+	case loopMsg:
+		if errors.Is(msg.err, playerctl.ErrUnsupported) {
+			m.loop = ""
+			m.loopUnsupported = true
+			m.err = nil
+			return m, nil
+		}
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.loop = msg.loop
+		m.loopUnsupported = false
+		m.err = nil
+		return m, nil
+	case loopSetMsg:
+		if errors.Is(msg.err, playerctl.ErrUnsupported) {
+			m.loop = ""
+			m.loopUnsupported = true
+			m.err = nil
+			return m, nil
+		}
+		m.err = msg.err
+		if msg.err != nil {
+			return m, nil
+		}
+		return m, getLoopCmd(m.player, m.selectedPlayer)
+	case shuffleMsg:
+		if errors.Is(msg.err, playerctl.ErrUnsupported) {
+			m.shuffle = ""
+			m.shuffleUnsupported = true
+			m.err = nil
+			return m, nil
+		}
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.shuffle = msg.shuffle
+		m.shuffleUnsupported = false
+		m.err = nil
+		return m, nil
+	case shuffleToggleMsg:
+		if errors.Is(msg.err, playerctl.ErrUnsupported) {
+			m.shuffle = ""
+			m.shuffleUnsupported = true
+			m.err = nil
+			return m, nil
+		}
+		m.err = msg.err
+		if msg.err != nil {
+			return m, nil
+		}
+		return m, getShuffleCmd(m.player, m.selectedPlayer)
 	case streamsMsg:
 		m.streams = msg.streams
 		m.err = msg.err
@@ -279,20 +416,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "tab":
 			next := nextPlayer(m.players, m.selectedPlayer, 1)
-			if next == "" {
+			if next == "" || next == m.selectedPlayer {
 				return m, nil
 			}
 			m.selectedPlayer = next
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
-			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
+			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), getLoopCmd(m.player, m.selectedPlayer), getShuffleCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
 		case "shift+tab":
 			next := nextPlayer(m.players, m.selectedPlayer, -1)
-			if next == "" {
+			if next == "" || next == m.selectedPlayer {
 				return m, nil
 			}
 			m.selectedPlayer = next
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
-			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
+			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), getLoopCmd(m.player, m.selectedPlayer), getShuffleCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
 		case " ":
 			return m.withSelectedPlayer(func(player string) tea.Cmd {
 				return toggleCmd(m.player, player)
@@ -327,6 +464,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.withSelectedStream(func(streamID string) tea.Cmd {
 				return muteCmd(m.audio, streamID)
 			})
+		case "s":
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return toggleShuffleCmd(m.player, player)
+			})
+		case "r":
+			return m.withSelectedPlayer(func(player string) tea.Cmd {
+				return setLoopCmd(m.player, player, nextLoopStatus(m.loop))
+			})
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
@@ -338,6 +483,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("wave\n\nerror: %v\n\n[q] quit\n", m.err)
+	}
+
+	if len(m.players) == 0 && m.now.Player == "" {
+		return "wave\n\nno player available right now\n\n[q] quit\n"
 	}
 
 	streamName := "-"
@@ -355,8 +504,24 @@ func (m model) View() string {
 		}
 	}
 
+	shuffle := "-"
+	switch {
+	case m.shuffleUnsupported:
+		shuffle = "unavailable"
+	case m.shuffle != "":
+		shuffle = string(m.shuffle)
+	}
+
+	loop := "-"
+	switch {
+	case m.loopUnsupported:
+		loop = "unavailable"
+	case m.loop != "":
+		loop = string(m.loop)
+	}
+
 	return fmt.Sprintf(
-		"wave\n\nPlayer: %s\nStatus: %s\nTitle: %s\nArtist: %s\nPosition: %d\nLength: %d\nProgress: %s\n\nAudio Stream: %s\nVolume: %s\nMuted: %s\n\n[tab] player  [-/=] volume  [m] mute  [space] toggle  [q] quit\n",
+		"wave\n\nPlayer: %s\nStatus: %s\nTitle: %s\nArtist: %s\nPosition: %d\nLength: %d\nProgress: %s\nRepeat: %s\nShuffle: %s\n\nAudio Stream: %s\nVolume: %s\nMuted: %s\n\n[tab] player  [r] repeat  [s] shuffle  [-/=] volume  [m] mute  [space] toggle  [q] quit\n",
 		m.now.Player,
 		m.now.Status,
 		m.now.Title,
@@ -364,6 +529,8 @@ func (m model) View() string {
 		m.now.Position,
 		m.now.LengthUS,
 		share.ProgressLabel(m.now.Position, m.now.LengthUS),
+		loop,
+		shuffle,
 		streamName,
 		volume,
 		muted,
@@ -515,6 +682,19 @@ func nextPlayer(players []string, selected string, delta int) string {
 
 	i = (i + delta + len(players)) % len(players)
 	return players[i]
+}
+
+func nextLoopStatus(current playerctl.LoopStatus) playerctl.LoopStatus {
+	switch current {
+	case playerctl.LoopNone:
+		return playerctl.LoopTrack
+	case playerctl.LoopTrack:
+		return playerctl.LoopPlaylist
+	case playerctl.LoopPlaylist:
+		return playerctl.LoopNone
+	default:
+		return playerctl.LoopNone
+	}
 }
 
 func nextStream(streams []wpctl.Stream, selected string, delta int) string {
