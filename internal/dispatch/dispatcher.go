@@ -44,7 +44,7 @@ type Player interface {
 type Audio interface {
 	Streams(context.Context) ([]wpctl.Stream, error)
 	StreamByID(context.Context, string) (wpctl.Stream, error)
-	ChangeVolume(context.Context, string, int) error
+	ChangeVolume(context.Context, string, float64, int) error
 	ToggleMute(context.Context, string) error
 }
 

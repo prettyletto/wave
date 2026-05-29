@@ -96,14 +96,18 @@ func (c *Client) SetVolume(ctx context.Context, streamID string, volume float64)
 	return err
 }
 
-func (c *Client) ChangeVolume(ctx context.Context, streamID string, deltaPercent int) error {
-	sign := "+"
-	if deltaPercent < 0 {
-		sign = "-"
-		deltaPercent = -deltaPercent
+func (c *Client) ChangeVolume(ctx context.Context, streamID string, currentVolume float64, deltaPercent int) error {
+	step := float64(deltaPercent) / 100.0
+	target := currentVolume + step
+
+	if target < 0 {
+		target = 0
+	}
+	if target > 2.0 {
+		target = 2.0
 	}
 
-	_, err := c.run(ctx, "wpctl", "set-volume", streamID, fmt.Sprintf("%d%%%s", deltaPercent, sign))
+	_, err := c.run(ctx, "wpctl", "set-volume", streamID, fmt.Sprintf("%.2f", target))
 	return err
 }
 

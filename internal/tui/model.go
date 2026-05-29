@@ -35,7 +35,7 @@ type Player interface {
 type Audio interface {
 	Streams(context.Context) ([]wpctl.Stream, error)
 	StreamByID(context.Context, string) (wpctl.Stream, error)
-	ChangeVolume(context.Context, string, int) error
+	ChangeVolume(context.Context, string, float64, int) error
 	ToggleMute(context.Context, string) error
 }
 
@@ -99,12 +99,12 @@ type model struct {
 	player Player
 	audio  Audio
 
-	now     playerctl.TrackInfo
-	loop    playerctl.LoopStatus
-	shuffle playerctl.ShuffleStatus
-	loopUnsupported bool
+	now                playerctl.TrackInfo
+	loop               playerctl.LoopStatus
+	shuffle            playerctl.ShuffleStatus
+	loopUnsupported    bool
 	shuffleUnsupported bool
-	err     error
+	err                error
 
 	players        []string
 	selectedPlayer string
@@ -232,9 +232,9 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func volumeCmd(a Audio, selectedStream string, delta int) tea.Cmd {
+func volumeCmd(a Audio, selectedStream string, currentVolume float64, delta int) tea.Cmd {
 	return func() tea.Msg {
-		return volumeMsg{err: a.ChangeVolume(context.Background(), selectedStream, delta)}
+		return volumeMsg{err: a.ChangeVolume(context.Background(), selectedStream, currentVolume, delta)}
 	}
 }
 
@@ -452,12 +452,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		case "-":
 			return m.withSelectedStream(func(streamID string) tea.Cmd {
-				return volumeCmd(m.audio, streamID, -5)
+				return volumeCmd(m.audio, streamID, m.currentStream.Volume, -5)
 			})
 
 		case "=":
 			return m.withSelectedStream(func(streamID string) tea.Cmd {
-				return volumeCmd(m.audio, streamID, 5)
+				return volumeCmd(m.audio, streamID, m.currentStream.Volume, 5)
 			})
 
 		case "m":
@@ -695,20 +695,6 @@ func nextLoopStatus(current playerctl.LoopStatus) playerctl.LoopStatus {
 	default:
 		return playerctl.LoopNone
 	}
-}
-
-func nextStream(streams []wpctl.Stream, selected string, delta int) string {
-	if len(streams) == 0 {
-		return ""
-	}
-
-	i := selectedStreamIndex(streams, selected)
-	if i == -1 {
-		return streams[0].ID
-	}
-
-	i = (i + delta + len(streams)) % len(streams)
-	return streams[i].ID
 }
 
 func (m model) withSelectedPlayer(cmd func(string) tea.Cmd) (tea.Model, tea.Cmd) {
