@@ -16,6 +16,13 @@ import (
 	"github.com/prettyletto/wave/internal/wpctl"
 )
 
+type listSection int
+
+const (
+	sectionPlayers listSection = iota
+	sectionStreams
+)
+
 type Player interface {
 	Players(context.Context) ([]string, error)
 
@@ -112,6 +119,12 @@ type model struct {
 	streams        []wpctl.Stream
 	selectedStream string
 	currentStream  wpctl.Stream
+
+	listOpen     bool
+	listSection  listSection
+	playerCursor int
+	streamCursor int
+	streamLocked bool
 }
 
 func NewModel(p Player, a Audio) model {
@@ -413,13 +426,84 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fetchStreamCmd(m.audio, m.selectedStream),
 			tickCmd())
 	case tea.KeyMsg:
+		if m.listOpen {
+			switch msg.String() {
+			case "ctrl+l", "esc":
+				m.closeList()
+				return m, nil
+
+			case "left", "h":
+				m.listSection = sectionPlayers
+				return m, nil
+
+			case "right", "l":
+				m.listSection = sectionStreams
+				return m, nil
+
+			case "up", "k":
+				if m.listSection == sectionPlayers {
+					m.playerCursor = moveCursor(m.playerCursor, len(m.players), -1)
+				} else {
+					m.streamCursor = moveCursor(m.streamCursor, len(m.streams), -1)
+				}
+				return m, nil
+
+			case "down", "j":
+				if m.listSection == sectionPlayers {
+					m.playerCursor = moveCursor(m.playerCursor, len(m.players), 1)
+				} else {
+					m.streamCursor = moveCursor(m.streamCursor, len(m.streams), 1)
+				}
+				return m, nil
+
+			case "enter":
+				if m.listSection == sectionPlayers {
+					if len(m.players) == 0 || m.playerCursor >= len(m.players) {
+						return m, nil
+					}
+
+					next := m.players[m.playerCursor]
+					if next == "" {
+						return m, nil
+					}
+
+					m.selectedPlayer = next
+					m.streamLocked = false
+					_ = state.SaveSelectedPlayer(m.selectedPlayer)
+					m.closeList()
+
+					return m, tea.Batch(
+						fetchNowCmd(m.player, m.selectedPlayer),
+						getLoopCmd(m.player, m.selectedPlayer),
+						getShuffleCmd(m.player, m.selectedPlayer),
+						m.syncSelectedStreamCmd(),
+					)
+				}
+
+				if len(m.streams) == 0 || m.streamCursor >= len(m.streams) {
+					return m, nil
+				}
+
+				m.selectedStream = m.streams[m.streamCursor].ID
+				m.streamLocked = true
+				m.closeList()
+				return m, fetchStreamCmd(m.audio, m.selectedStream)
+			}
+
+			return m, nil
+		}
+
 		switch msg.String() {
+		case "ctrl+l":
+			m.openList()
+			return m, nil
 		case "tab":
 			next := nextPlayer(m.players, m.selectedPlayer, 1)
 			if next == "" || next == m.selectedPlayer {
 				return m, nil
 			}
 			m.selectedPlayer = next
+			m.streamLocked = false
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
 			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), getLoopCmd(m.player, m.selectedPlayer), getShuffleCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
 		case "shift+tab":
@@ -428,6 +512,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.selectedPlayer = next
+			m.streamLocked = false
 			_ = state.SaveSelectedPlayer(m.selectedPlayer)
 			return m, tea.Batch(fetchNowCmd(m.player, m.selectedPlayer), getLoopCmd(m.player, m.selectedPlayer), getShuffleCmd(m.player, m.selectedPlayer), m.syncSelectedStreamCmd())
 		case " ":
@@ -520,8 +605,13 @@ func (m model) View() string {
 		loop = string(m.loop)
 	}
 
-	return fmt.Sprintf(
-		"wave\n\nPlayer: %s\nStatus: %s\nTitle: %s\nArtist: %s\nPosition: %d\nLength: %d\nProgress: %s\nRepeat: %s\nShuffle: %s\n\nAudio Stream: %s\nVolume: %s\nMuted: %s\n\n[tab] player  [r] repeat  [s] shuffle  [-/=] volume  [m] mute  [space] toggle  [q] quit\n",
+	help := "[tab] player  [ctrl+l] list  [r] repeat  [s] shuffle  [-/=] volume  [m] mute  [space] toggle  [q] quit"
+	if m.listOpen {
+		help = "[up/down] move  [left/right] focus  [enter] select  [esc] close  [q] quit"
+	}
+
+	base := fmt.Sprintf(
+		"wave\n\nPlayer: %s\nStatus: %s\nTitle: %s\nArtist: %s\nPosition: %d\nLength: %d\nProgress: %s\nRepeat: %s\nShuffle: %s\n\nAudio Stream: %s\nVolume: %s\nMuted: %s\n\n%s\n",
 		m.now.Player,
 		m.now.Status,
 		m.now.Title,
@@ -534,7 +624,14 @@ func (m model) View() string {
 		streamName,
 		volume,
 		muted,
+		help,
 	)
+
+	if m.listOpen {
+		return base + m.listView()
+	}
+
+	return base
 }
 
 func containsPlayer(players []string, selected string) bool {
@@ -712,10 +809,16 @@ func (m model) withSelectedStream(cmd func(string) tea.Cmd) (tea.Model, tea.Cmd)
 }
 
 func (m *model) syncSelectedStreamCmd() tea.Cmd {
+
+	if m.streamLocked && m.selectedStream != "" && containsStream(m.streams, m.selectedStream) {
+		return fetchStreamCmd(m.audio, m.selectedStream)
+	}
+
 	next := matchStreamID(m.selectedPlayer, m.streams)
 	if next == "" {
 		m.selectedStream = ""
 		m.currentStream = wpctl.Stream{}
+		m.streamLocked = false
 		return nil
 	}
 
@@ -724,5 +827,128 @@ func (m *model) syncSelectedStreamCmd() tea.Cmd {
 	}
 
 	m.selectedStream = next
+	m.streamLocked = false
 	return fetchStreamCmd(m.audio, m.selectedStream)
+}
+
+func (m *model) openList() {
+	m.listOpen = true
+	m.listSection = sectionPlayers
+
+	m.playerCursor = selectedPlayerIndex(m.players, m.selectedPlayer)
+	if m.playerCursor < 0 {
+		m.playerCursor = 0
+	}
+
+	m.streamCursor = selectedStreamIndex(m.streams, m.selectedStream)
+	if m.streamCursor < 0 {
+		m.streamCursor = 0
+	}
+}
+
+func moveCursor(current, length, delta int) int {
+	if length == 0 {
+		return 0
+	}
+	current += delta
+	if current < 0 {
+		current = length - 1
+	}
+
+	if current >= length {
+		current = 0
+	}
+
+	return current
+}
+
+func renderPlayerList(players []string, selected string, cursor int, focused bool) string {
+	if len(players) == 0 {
+		return "  -"
+	}
+
+	var b strings.Builder
+	for i, player := range players {
+		prefix := " "
+		if focused && i == cursor {
+			prefix = "> "
+		}
+
+		label := player
+		if player == selected {
+			label += " [active]"
+		}
+
+		b.WriteString(prefix)
+		b.WriteString(label)
+		b.WriteByte('\n')
+
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+
+}
+
+func renderStreamList(streams []wpctl.Stream, selected string, cursor int, focused bool) string {
+	if len(streams) == 0 {
+		return "  -"
+	}
+
+	var b strings.Builder
+	for i, stream := range streams {
+		prefix := " "
+		if focused && i == cursor {
+			prefix = "> "
+		}
+
+		label := stream.Name
+		if label == "" {
+			label = stream.AppName
+		}
+		if label == "" {
+			label = stream.Binary
+		}
+		if label == "" {
+			label = stream.ID
+		}
+
+		if stream.ID == selected {
+			label += " [active]"
+		}
+
+		b.WriteString(prefix)
+		b.WriteString(label)
+		b.WriteByte('\n')
+
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m *model) closeList() {
+	m.listOpen = false
+}
+
+func (m model) listView() string {
+	if !m.listOpen {
+		return ""
+	}
+
+	playerTitle := "Players"
+	streamTitle := "Streams"
+
+	if m.listSection == sectionPlayers {
+		playerTitle = "> Players"
+	}
+	if m.listSection == sectionStreams {
+		streamTitle = "> Streams"
+	}
+
+	return fmt.Sprintf(
+		"\nSelection\n\n%s\n%s\n\n%s\n%s\n\n[up/down] move  [left/right] focus  [enter] select  [esc] close\n",
+		playerTitle,
+		renderPlayerList(m.players, m.selectedPlayer, m.playerCursor, m.listSection == sectionPlayers),
+		streamTitle,
+		renderStreamList(m.streams, m.selectedStream, m.streamCursor, m.listSection == sectionStreams),
+	)
 }
