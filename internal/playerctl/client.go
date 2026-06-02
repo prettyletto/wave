@@ -212,7 +212,7 @@ func (c *Client) Volume(ctx context.Context) (float64, error) {
 }
 
 func (c *Client) NowForPlayer(ctx context.Context, player string) (TrackInfo, error) {
-	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:length}}"
+	const format = "{{playerName}}\t{{status}}\t{{xesam:title}}\t{{xesam:artist}}\t{{xesam:album}}\t{{mpris:artUrl}}\t{{mpris:length}}"
 
 	out, err := c.runForPlayer(ctx, player, "metadata", "--format", format)
 	if err != nil {

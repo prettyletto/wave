@@ -52,8 +52,9 @@ func (m model) View() string {
 	}
 
 	base := fmt.Sprintf(
-		"wave\n\nPlayer: %s\nStatus: %s\nTitle: %s\nArtist: %s\nPosition: %d\nLength: %d\nProgress: %s\nRepeat: %s\nShuffle: %s\n\nAudio Stream: %s\nVolume: %s\nMuted: %s\n\n%s\n",
+		"wave\n\nPlayer: %s\nArtWork: %s\nStatus: %s\nTitle: %s\nArtist: %s\nPosition: %d\nLength: %d\nProgress: %s\nRepeat: %s\nShuffle: %s\n\nAudio Stream: %s\nVolume: %s\nMuted: %s\n\n%s\n",
 		m.now.Player,
+		m.now.ArtUrl,
 		m.now.Status,
 		m.now.Title,
 		m.now.Artist,

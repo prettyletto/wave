@@ -70,6 +70,7 @@ func ParseShuffleStatus(s string) (ShuffleStatus, error) {
 }
 
 type TrackInfo struct {
+	ArtUrl   string
 	Player   string
 	Status   PlayStatus
 	Title    string
@@ -81,7 +82,9 @@ type TrackInfo struct {
 
 func (t TrackInfo) String() string {
 	return fmt.Sprintf(
-		"Player: %s\nStatus: %s\nTitle: %s\nArtist: %s\nAlbum: %s\nLength: %d\nPosition: %d", t.Player,
+		"Player: %s\nArtWork: %s\nStatus: %s\nTitle: %s\nArtist: %s\nAlbum: %s\nLength: %d\nPosition: %d",
+		t.Player,
+		t.ArtUrl,
 		t.Status,
 		t.Title,
 		t.Artist,
@@ -94,7 +97,7 @@ func (t TrackInfo) String() string {
 func ParseTrackInfo(s string) (TrackInfo, error) {
 	parts := strings.Split(strings.TrimSpace(s), "\t")
 
-	if len(parts) != 6 {
+	if len(parts) != 7 {
 		return TrackInfo{}, fmt.Errorf("invalid metadata field count: got %d", len(parts))
 	}
 
@@ -104,10 +107,10 @@ func ParseTrackInfo(s string) (TrackInfo, error) {
 	}
 
 	length := int64(0)
-	if strings.TrimSpace(parts[5]) != "" {
-		length, err = strconv.ParseInt(strings.TrimSpace(parts[5]), 10, 64)
+	if strings.TrimSpace(parts[6]) != "" {
+		length, err = strconv.ParseInt(strings.TrimSpace(parts[6]), 10, 64)
 		if err != nil {
-			return TrackInfo{}, fmt.Errorf("invalid mpris:length %q: %w", parts[5], err)
+			return TrackInfo{}, fmt.Errorf("invalid mpris:length %q: %w", parts[6], err)
 		}
 	}
 
@@ -117,6 +120,7 @@ func ParseTrackInfo(s string) (TrackInfo, error) {
 		Title:    strings.TrimSpace(parts[2]),
 		Artist:   strings.TrimSpace(parts[3]),
 		Album:    strings.TrimSpace(parts[4]),
+		ArtUrl:   strings.TrimSpace(parts[5]),
 		LengthUS: length,
 	}, nil
 
